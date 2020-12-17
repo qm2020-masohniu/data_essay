@@ -1,0 +1,627 @@
+---
+title: "Spatial Voting in US Presidential Election"
+author: "Marie-Lou Sohnius"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  bookdown::pdf_document2: 
+    toc: false
+  html_document: default
+  pdf_document: default
+documentclass: article
+classoption: a4paper
+subtitle: 'Quantitative Methods 2020: Final Data Essay'
+abstract: |
+  The text of your abstract.  150 -- 250 words.
+keywords:
+  - key
+  - dictionary
+  - word
+linestretch: 2
+geometry: "left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm"
+---
+
+```{r setup, include=FALSE}
+# The first line sets an option for the final document that can be produced from
+# the .Rmd file. Don't worry about it.
+knitr::opts_chunk$set(echo = TRUE)
+
+# The next bit is quite powerful and useful. 
+# First you define which packages you need for your analysis and assign it to 
+# the p_needed object. 
+p_needed <-
+  c("foreign", "viridis", "MASS", "optimx", 
+    "separationplot", "knitr",
+    "stargazer")
+
+# Now you check which packages are already installed on your computer.
+# The function installed.packages() returns a vector with all the installed 
+# packages.
+packages <- rownames(installed.packages())
+# Then you check which of the packages you need are not installed on your 
+# computer yet. Essentially you compare the vector p_needed with the vector
+# packages. The result of this comparison is assigned to p_to_install.
+p_to_install <- p_needed[!(p_needed %in% packages)]
+# If at least one element is in p_to_install you then install those missing
+# packages.
+if (length(p_to_install) > 0) {
+  install.packages(p_to_install)
+}
+# Now that all packages are installed on the computer, you can load them for
+# this project. Additionally the expression returns whether the packages were
+# successfully loaded.
+sapply(p_needed, require, character.only = TRUE)
+
+# This is an option for stargazer tables
+# It automatically adapts the output to html or latex,
+# depending on whether we want a html or pdf file
+stargazer_opt <- ifelse(knitr::is_latex_output(), "latex", "html")
+```
+
+```{r}
+df <- read.dta("data/anes08_data_essay.dta")
+
+mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+m1 <-
+  glm(
+    obama ~ lib_con_self * party_id + race + male + age + relig_denomination + above_median_inc + college_degree,
+    data = df,
+    family = binomial(link = logit)
+  )
+summary(m1)
+
+
+# 1. get the coefficients
+beta_hat <- coef(m1)
+
+# 2. Get the variance-covariance matrix
+V_hat <- vcov(m1)
+
+# 3. Set up a multivariate normal distribution N(beta_hat, V_hat)
+# 4. Draw from the distribution nsim times
+nsim <- 10000
+S <- mvrnorm(n = nsim, 
+             mu = beta_hat, 
+             Sigma = V_hat)
+head(S)
+
+# we simulate over a sequence of x-values
+lr_seq <- seq(min(df$lib_con_self, na.rm=T), max(df$lib_con_self, na.rm=T), length.out = 100)
+
+# lr_seq <- seq(1,7,length.out = 7)
+# What about the other covariates? Following average case practice, we take the 
+# mode for dummy variables and rounding to the nearest whole number for categorical variables:
+
+
+
+# Democrats 
+scenario_dem <- cbind(1, # Intercept
+                  lr_seq, # LR Scale
+                  0, # Party ID = Independent
+                  0, # Party ID = Republican
+                  0, # Race = Black
+                  0, # Race = Other/Mixed
+                  0, # Gender = Male
+                  mean(df$age, na.rm=T), # Age
+                  0, # Religion = Protestant
+                  0, # Religion = Catholic
+                  0, # Religion = Other
+                  0, # Above Median Income
+                  0, # College Degree
+                  0, # LR Scale*Independent
+                  0  # LR Scale*Republican
+                  )
+
+Xbeta_dem <- S %*% t(scenario_dem)
+
+p_sim_dem <- (exp(Xbeta_dem))/ (1 + exp(Xbeta_dem))
+
+p_mean_dem <- apply(p_sim_dem, 2, mean)
+p_qu_dem <- t(apply(p_sim_dem, 2, quantile, prob = c(0.025, 0.975)))
+
+# Independents 
+scenario_ind <- cbind(1, # Intercept
+                  lr_seq, # LR Scale
+                  1, # Party ID = Independent
+                  0, # Party ID = Republican
+                  0, # Race = Black
+                  0, # Race = Other/Mixed
+                  0, # Gender = Male
+                  mean(df$age, na.rm=T), # Age
+                  0, # Religion = Protestant
+                  0, # Religion = Catholic
+                  0, # Religion = Other
+                  0, # Above Median Income
+                  0, # College Degree
+                  lr_seq*1, # LR Scale*Independent
+                  0  # LR Scale*Republican
+                  )
+
+Xbeta_ind <- S %*% t(scenario_ind)
+
+p_sim_ind <- (exp(Xbeta_ind))/ (1 + exp(Xbeta_ind))
+
+p_mean_ind <- apply(p_sim_ind, 2, mean)
+p_qu_ind <- t(apply(p_sim_ind, 2, quantile, prob = c(0.025, 0.975)))
+
+# Republicans 
+scenario_rep <- cbind(1, # Intercept
+                  lr_seq, # LR Scale
+                  0, # Party ID = Independent
+                  1, # Party ID = Republican
+                  0, # Race = Black
+                  0, # Race = Other/Mixed
+                  0, # Gender = Male
+                  mean(df$age, na.rm=T), # Age
+                  0, # Religion = Protestant
+                  0, # Religion = Catholic
+                  0, # Religion = Other
+                  0, # Above Median Income
+                  0, # College Degree
+                  0, # LR Scale*Independent
+                  lr_seq*1  # LR Scale*Republican
+                  )
+
+Xbeta_rep <- S %*% t(scenario_rep)
+
+p_sim_rep <- (exp(Xbeta_rep))/ (1 + exp(Xbeta_rep))
+
+p_mean_rep <- apply(p_sim_rep, 2, mean)
+p_qu_rep <- t(apply(p_sim_rep, 2, quantile, prob = c(0.025, 0.975)))
+
+
+```
+```{r}
+
+plot(
+  x = lr_seq,
+  y = p_mean_dem,
+  ylim = c(0, 1),
+  type = "n",
+  main = "Party Identification and Spatial Voting",
+  ylab = "Probability of Voting for Obama",
+  xlab = "Voter Ideal Point",
+  bty = "n",
+  las = 1
+)
+
+# Democrats
+
+# plot uncertainty with a polygon
+# polygon(x = c(rev(lr_seq), lr_seq),
+#         y = c(rev(p_qu_dem[,2]), p_qu_dem[,1]),
+#         col = "#cccccc",
+#         border = NA)
+
+# and a line
+lines(x = lr_seq,
+      y = p_mean_dem,
+      lwd = 3,
+      lty = 1)
+
+# Independents
+
+# plot uncertainty with a polygon
+# polygon(x = c(rev(lr_seq), lr_seq),
+#         y = c(rev(p_qu_ind[,2]), p_qu_ind[,1]),
+#         col = "#cccccc",
+#         border = NA)
+
+# and a line
+lines(x = lr_seq,
+      y = p_mean_ind,
+      lwd = 3,
+      lty = 2)
+
+
+# Republicans
+
+# plot uncertainty with a polygon
+# polygon(x = c(rev(lr_seq), lr_seq),
+#         y = c(rev(p_qu_rep[,2]), p_qu_rep[,1]),
+#         col = "#cccccc",
+#         border = NA)
+
+# and a line
+lines(x = lr_seq,
+      y = p_mean_rep,
+      lwd = 3,
+      lty = 3)
+
+
+legend(
+  "bottomleft",
+  legend = c("Democrat", "Independent", "Republican"),
+  col = c("black", "black", "black"),
+  lty = 1:3,
+  cex = 0.8
+)
+
+abline(h = 0.5, col = "red", lty = 4)
+
+```
+```{r}
+
+obama_position <- 2.83
+mccain_position <- 5.28
+
+# Democrats
+
+scenario_dem_1 <- cbind(1, # Intercept
+                  obama_position, # LR Scale
+                  0, # Party ID = Independent
+                  0, # Party ID = Republican
+                  0, # Race = Black
+                  0, # Race = Other/Mixed
+                  0, # Gender = Male
+                  mean(df$age, na.rm=T), # Age
+                  0, # Religion = Protestant
+                  0, # Religion = Catholic
+                  0, # Religion = Other
+                  0, # Above Median Income
+                  0, # College Degree
+                  0, # LR Scale*Independent
+                  0  # LR Scale*Republican
+                  )
+
+
+Xbeta_dem_1 <- S %*% t(scenario_dem_1)
+
+p_sim_dem_1 <- (exp(Xbeta_dem_1))/ (1 + exp(Xbeta_dem_1))
+
+p_mean_dem_1 <- apply(p_sim_dem_1, 2, mean)
+p_qu_dem_1 <- t(apply(p_sim_dem_1, 2, quantile, prob = c(0.025, 0.975)))
+
+
+
+scenario_dem_2 <- cbind(1, # Intercept
+                  mccain_position, # LR Scale
+                  0, # Party ID = Independent
+                  0, # Party ID = Republican
+                  0, # Race = Black
+                  0, # Race = Other/Mixed
+                  0, # Gender = Male
+                  mean(df$age, na.rm=T), # Age
+                  0, # Religion = Protestant
+                  0, # Religion = Catholic
+                  0, # Religion = Other
+                  0, # Above Median Income
+                  0, # College Degree
+                  0, # LR Scale*Independent
+                  0  # LR Scale*Republican
+                  )
+
+Xbeta_dem_2 <- S %*% t(scenario_dem_2)
+
+p_sim_dem_2 <- (exp(Xbeta_dem_2))/ (1 + exp(Xbeta_dem_2))
+
+p_mean_dem_2 <- apply(p_sim_dem_2, 2, mean)
+p_qu_dem_2 <- t(apply(p_sim_dem_2, 2, quantile, prob = c(0.025, 0.975)))
+
+
+fd_dem <- p_sim_dem_1 - p_sim_dem_2
+fd_mean_dem <- apply(fd_dem, 2, mean)
+fd_qu_dem <- t(apply(fd_dem, 2, quantile, prob = c(0.025, 0.975)))
+
+# Independents
+
+scenario_ind_1 <- cbind(1, # Intercept
+                  obama_position, # LR Scale
+                  1, # Party ID = Independent
+                  0, # Party ID = Republican
+                  0, # Race = Black
+                  0, # Race = Other/Mixed
+                  0, # Gender = Male
+                  mean(df$age, na.rm=T), # Age
+                  0, # Religion = Protestant
+                  0, # Religion = Catholic
+                  0, # Religion = Other
+                  0, # Above Median Income
+                  0, # College Degree
+                  obama_position*1, # LR Scale*Independent
+                  0  # LR Scale*Republican
+                  )
+
+Xbeta_ind_1 <- S %*% t(scenario_ind_1)
+
+p_sim_ind_1 <- (exp(Xbeta_ind_1))/ (1 + exp(Xbeta_ind_1))
+
+p_mean_ind_1 <- apply(p_sim_ind_1, 2, mean)
+p_qu_ind_1 <- t(apply(p_sim_ind_1, 2, quantile, prob = c(0.025, 0.975)))
+
+
+
+
+scenario_ind_2 <- cbind(1, # Intercept
+                  mccain_position, # LR Scale
+                  1, # Party ID = Independent
+                  0, # Party ID = Republican
+                  0, # Race = Black
+                  0, # Race = Other/Mixed
+                  0, # Gender = Male
+                  mean(df$age, na.rm=T), # Age
+                  0, # Religion = Protestant
+                  0, # Religion = Catholic
+                  0, # Religion = Other
+                  0, # Above Median Income
+                  0, # College Degree
+                  mccain_position*1, # LR Scale*Independent
+                  0  # LR Scale*Republican
+                  )
+
+Xbeta_ind_2 <- S %*% t(scenario_ind_2)
+
+p_sim_ind_2 <- (exp(Xbeta_ind_2))/ (1 + exp(Xbeta_ind_2))
+
+p_mean_ind_2 <- apply(p_sim_ind_2, 2, mean)
+p_qu_ind_2 <- t(apply(p_sim_ind_2, 2, quantile, prob = c(0.025, 0.975)))
+
+fd_ind <- p_sim_ind_1 - p_sim_ind_2
+fd_mean_ind <- apply(fd_ind, 2, mean)
+fd_qu_ind <- t(apply(fd_ind, 2, quantile, prob = c(0.025, 0.975)))
+
+
+# Republicans
+
+scenario_rep_1 <- cbind(1, # Intercept
+                  obama_position, # LR Scale
+                  0, # Party ID = Independent
+                  1, # Party ID = Republican
+                  0, # Race = Black
+                  0, # Race = Other/Mixed
+                  0, # Gender = Male
+                  mean(df$age, na.rm=T), # Age
+                  0, # Religion = Protestant
+                  0, # Religion = Catholic
+                  0, # Religion = Other
+                  0, # Above Median Income
+                  0, # College Degree
+                  0, # LR Scale*Independent
+                  obama_position*1  # LR Scale*Republican
+                  )
+
+
+Xbeta_rep_1 <- S %*% t(scenario_rep_1)
+
+p_sim_rep_1 <- (exp(Xbeta_rep_1))/ (1 + exp(Xbeta_rep_1))
+
+p_mean_rep_1 <- apply(p_sim_rep_1, 2, mean)
+p_qu_rep_1 <- t(apply(p_sim_rep_1, 2, quantile, prob = c(0.025, 0.975)))
+
+
+scenario_rep_2 <- cbind(1, # Intercept
+                  mccain_position, # LR Scale
+                  0, # Party ID = Independent
+                  1, # Party ID = Republican
+                  0, # Race = Black
+                  0, # Race = Other/Mixed
+                  0, # Gender = Male
+                  mean(df$age, na.rm=T), # Age
+                  0, # Religion = Protestant
+                  0, # Religion = Catholic
+                  0, # Religion = Other
+                  0, # Above Median Income
+                  0, # College Degree
+                  0, # LR Scale*Independent
+                  mccain_position*1  # LR Scale*Republican
+                  )
+
+Xbeta_rep_2 <- S %*% t(scenario_rep_2)
+
+p_sim_rep_2 <- (exp(Xbeta_rep_2))/ (1 + exp(Xbeta_rep_2))
+
+p_mean_rep_2 <- apply(p_sim_rep_2, 2, mean)
+p_qu_rep_2 <- t(apply(p_sim_rep_2, 2, quantile, prob = c(0.025, 0.975)))
+
+fd_rep <- p_sim_rep_1 - p_sim_rep_2
+fd_mean_rep <- apply(fd_rep, 2, mean)
+fd_qu_rep <- t(apply(fd_rep, 2, quantile, prob = c(0.025, 0.975)))
+
+party_id <- c("Democrat", "Independent", "Republican")
+mean <- c(fd_mean_dem, fd_mean_ind, fd_mean_rep)
+lower <- c(fd_qu_dem[1,1], fd_qu_ind[1,1], fd_qu_rep[1,1])
+upper <- c(fd_qu_dem[1,2], fd_qu_ind[1,2], fd_qu_rep[1,2])
+fds <- data.frame(party_id, mean, lower, upper)
+
+```
+
+```{r}
+
+
+
+
+
+```
+
+```{r}
+
+
+m2 <-
+  glm(obama ~ lib_con_self * party_id,
+      data = df,
+      family = binomial(link = logit))
+summary(m2)
+
+independents_hi <-
+  df[which(df$party_id == "Independent" & df$pol_knowledge == 1), ]
+
+m3 <-
+  glm(
+    obama ~ lib_con_self + race + male + age + relig_denomination + above_median_inc + college_degree,
+    data = independents_hi,
+    family = binomial(link = logit)
+  )
+summary(m3)
+
+```
+
+
+# Introduction
+
+As you know by now, this is an R Markdown document. By this point in the semester, you should be familiar with how this works. We still want to give you some tips if you want to write your data essay in R Markdown.
+
+We want you to submit your data essay in .pdf format. You can generate .pdf files from your .Rmd files. This is done by selecting `Knit` > `Knit to pdf`. If this does not work yet on yur computer, run the following code:
+
+
+# Organizing the write-up with section titles
+
+You can use `#` hashtags to organize you write-up with section-titles on different levels. This is how it works:
+
+# Section
+
+## Subsection
+
+## Subsubsection
+
+### Subsubsubsection
+
+Markdown can do many more things: 
+
+## Text formatting options
+
+Markdown also provides an easy way to format the text in your document. Here are some basics:
+
+  - *This text is italic*
+  - **This text is bold**
+  - `This is code`
+  - [This is a link to the R Markdown homepage](https://rmarkdown.rstudio.com)
+
+For more formatting options, we recommend the [R Markdown Cheat Sheet](https://rstudio.com/wp-content/uploads/2016/03/rmarkdown-cheatsheet-2.0.pdf?_ga=2.195559076.94966807.1602002830-1180689241.1600075670).
+
+# Chunk Options
+
+As you know, you can write code in R Markdown. This means, that you can do the coding and the write up in one single document. This is a great feature because it ensures that it will be easy to reproduce your document right away. However, to get a good looking write up, you most likely (especially if it should like in a journal article) only want to show tables and figures but hide the code in your final document. This is not difficult to achieve in R Markdown. You only have to adjust chunk options.
+
+Chunk output in your final document can be customized with knitr options, arguments set in the `{}` of a chunk header. Here are some useful arguments:
+
+  - `include = FALSE` prevents code and results from appearing in the finished file. R Markdown still runs the code in the chunk, and the results can be used by other chunks. This is useful for running your data pre-processing and models.
+  - `echo = FALSE` prevents code, but not the results from appearing in the finished file. This is a useful way to embed figures.
+  - `message = FALSE` prevents messages that are generated by code from appearing in the finished file.
+  - `warning = FALSE` prevents warnings that are generated by code from appearing in the finished.
+  - `fig.cap = "..."` adds a caption to a figure produced by the chunk.
+
+See the [R Markdown Reference Guide](https://rstudio.com/wp-content/uploads/2015/03/rmarkdown-reference.pdf?_ga=2.169319849.94966807.1602002830-1180689241.1600075670) for a complete list of knitr chunk options.
+
+# Example
+
+Let's do an example: We want to simulate some data and create a plot. But the write up should only show the plot without any code.
+
+```{r, include=FALSE}
+# we simulate some data
+# althoug we want to run this code, it should not appear in the write-up
+# that's why we include 'include=FALSE' in the chunk options above
+
+x <- runif(1000, 1, 4)
+y <- runif(1000, 1, 4)
+
+col <- round(x*y)
+```
+
+```{r single-plot, echo = FALSE, dpi=300, fig.width=7, fig.height=7, out.width='75%', fig.align='center', fig.cap='A colorful plot'}
+
+# we set a couple of options:
+
+# echo=FALSE makes sure that we show the output of the chunk (but not the code)
+# dpi=300 makes sure that the resolution of the plot is high enough
+# fig.width=7 defines the relative with of the plot
+# fig.height=7 defines the relative height of the plot
+# out.width='75%' defines the total width of the plot
+# fig.align='center' defines the alignment of the plot
+# fig.cap='A colorful plot' generates a caption for the plot
+
+plot(x = x,
+     y = y,
+     xlim = c(1, 4),
+     ylim = c(1, 4),
+     xaxt = "n",
+     yaxt = "n",
+     pch = 19,
+     bty = "n",
+     xlab = "",
+     ylab = "",
+     col = viridis(max(col), 0.5)[col])
+```
+
+You can even cross-reference Figures in your text. For this to work you need to install the bookdown package and set the output to bookdown::pdf_document2. You can see how to do this in the yaml header of this document. Instead of knit to pdf_document you can then use knit to pdf_document2. 
+
+You just have to set a chunk name and use it like: In Figure \@ref(fig:single-plot) you can see very colorful points. You can also include calculated values directly in your text. The minimum value on the x-axis is `r round(min(x), 2)` and the mean value on the x-axis is `r round(mean(x), 2)`.
+
+You can also plot two (or more) plots next to each other. You can see these in Figure \@ref(fig:two-plots).^[This is a footnote.]
+
+```{r two-plots, echo = FALSE, dpi=300, fig.width=7, fig.height=3.5, out.width='100%', fig.align='center', fig.cap='Two colorful plots'}
+
+# we set a couple of options:
+
+# echo=FALSE makes sure that we show the output of the chunk (but not the code)
+# dpi=300 makes sure that the resolution of the plot is high enough
+# fig.width=7 defines the relative with of the plot
+# fig.height=3.5 defines the relative height of the plot
+# out.width='100%' defines the total width of the plot
+# fig.align='center' defines the alignment of the plot
+# fig.cap='Two colorful plots' generates a caption for the plot
+
+# generate a 1 by 2 plot window
+par(mfrow = c(1, 2),
+    # we reduce the blank space around the plot 
+    # (where axis labels and titles are usually plotted)
+    mar = c(0, 0, 0, 0) + 0.1) 
+
+plot(x = x,
+     y = y,
+     xlim = c(1, 4),
+     ylim = c(1, 4),
+     xaxt = "n",
+     yaxt = "n",
+     pch = 19,
+     bty = "n",
+     xlab = "",
+     ylab = "",
+     col = viridis(max(col), 0.5)[col])
+
+plot(x = x,
+     y = y,
+     xlim = c(1, 4),
+     ylim = c(1, 4),
+     xaxt = "n",
+     yaxt = "n",
+     pch = 22,
+     cex = 2,
+     bty = "n",
+     xlab = "",
+     ylab = "",
+     col = viridis(round(max(x)), 0.5)[round(x)])
+```
+
+\pagebreak
+
+You also might to show a table (e.g. regression table) and reference Table \@ref(tab:regression) in your text.
+
+```{r, echo = FALSE, results='asis'}
+
+# we set three options here:
+
+# echo=FALSE makes sure that we show the output of the chunk (but not the code)
+# message=FALSE hides all messages created in the code chunk
+# warning=FALSE hides all warnings created in the code chunk
+# results='asis' makes sure that the table gets printed nicely
+
+# note that for this to work, you must define "stargazer_opt" in the setup chunk
+# as we did in this file (see line 45).
+
+linear_model <- lm(y ~ x)
+
+stargazer(linear_model, # You can also add more than just one model
+          type = stargazer_opt, # Important to produce a nice table in the output document
+          covariate.labels = c("X"), # Make sure to have the labels in the right order
+          dep.var.labels = c("Y"),
+          header = F, # To surpress the stargazer comment
+          label = "tab:regression", # If you produce pdf output you can even cross-reference your table in your text.
+          title = "Regression Table")
+```
+
+Feel free to get in touch if you have a question regarding your write-up.
+
+**Good Luck  with the Data Essay!**
